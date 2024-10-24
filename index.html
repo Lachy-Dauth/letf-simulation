@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Monte Carlo Leveraged Portfolio Simulation</title>
+    <!-- Include Plotly.js from CDN -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        /* Reset some default styles */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7fa;
+            color: #333;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #34495e;
+            font-size: 1.1em;
+        }
+
+        .controls {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: 0 auto 30px auto;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .control-group input {
+            padding: 8px 12px;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .control-group input:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+
+        .button-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        #run_simulation {
+            background-color: #3498db;
+            color: #ffffff;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+        }
+
+        #run_simulation:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        #run_simulation:active {
+            background-color: #1c5980;
+            transform: translateY(0);
+        }
+
+        #heatmap {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 600px) {
+            .controls-grid {
+                grid-template-columns: 1fr;
+            }
+
+            #run_simulation {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Monte Carlo Simulations: Final Portfolio Value</h1>
+    <p class="subtitle">Leverage Ratios, Expected Return, Borrowing Cost, and Volatility Parameters</p>
+    <div class="controls">
+        <div class="controls-grid">
+            <div class="control-group">
+                <label for="expected_return">Expected Return (%)</label>
+                <input type="number" id="expected_return" value="12" step="0.1" min="-100" max="100">
+            </div>
+            <div class="control-group">
+                <label for="annual_sd">Annual Volatility (%)</label>
+                <input type="number" id="annual_sd" value="21" step="0.1" min="0" max="100">
+            </div>
+            <div class="control-group">
+                <label for="borrowing_cost">Borrowing Cost (%)</label>
+                <input type="number" id="borrowing_cost" value="4.5" step="0.1" min="0" max="100">
+            </div>
+            <div class="control-group">
+                <label for="years">Years</label>
+                <input type="number" id="years" value="10" step="1" min="1" max="100">
+            </div>
+            <div class="control-group">
+                <label for="num_simulations">Number of Simulations</label>
+                <input type="number" id="num_simulations" value="500" step="100" min="1" max="10000">
+            </div>
+            <div class="control-group">
+                <label for="leverage_ratios">Leverage Ratios (comma-separated)</label>
+                <input type="text" id="leverage_ratios" value="0,0.5,1,1.5,2,2.5,3,3.5,4,4.5,5">
+            </div>
+            <div class="control-group">
+                <label for="percentiles">Percentiles (comma-separated)</label>
+                <input type="text" id="percentiles" value="5,25,50,75,95">
+            </div>
+        </div>
+        <div class="button-container">
+            <button id="run_simulation">Run Simulation</button>
+        </div>
+    </div>
+    <div id="heatmap"></div>
+
+    <script>
+        // Function to generate normally distributed random numbers
+        function randomNormal(mean = 0, stdDev = 1) {
+            let u = 0, v = 0;
+            while (u === 0) u = Math.random();
+            while (v === 0) v = Math.random();
+            let num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+            return num * stdDev + mean;
+        }
+
+        // Monte Carlo Simulation Function
+        function monteCarloLeverageSimulation(expected_return, annual_sd, borrowing_cost, leverage, years, num_simulations, days_per_year) {
+            const daily_return = Math.pow(1 + expected_return, 1 / days_per_year) - 1;
+            const daily_sd = annual_sd / Math.sqrt(days_per_year);
+
+            const leveraged_daily_return = leverage * daily_return - (leverage - 1) * borrowing_cost / days_per_year;
+            const leveraged_daily_sd = leverage * daily_sd;
+
+            const total_days = years * days_per_year;
+            const portfolio_values = new Array(num_simulations).fill(1);
+
+            // Simulate returns
+            for (let t = 0; t < total_days; t++) {
+                for (let i = 0; i < num_simulations; i++) {
+                    const random_return = randomNormal(leveraged_daily_return, leveraged_daily_sd);
+                    portfolio_values[i] *= (1 + random_return);
+                }
+            }
+
+            return portfolio_values;
+        }
+
+        // Function to run the simulation and update the heatmap
+        function runSimulation() {
+            // Get parameters from input fields
+            let expected_return = parseFloat(document.getElementById('expected_return').value) / 100; // Convert to decimal
+            let annual_sd = parseFloat(document.getElementById('annual_sd').value) / 100; // Convert to decimal
+            let borrowing_cost = parseFloat(document.getElementById('borrowing_cost').value) / 100; // Convert to decimal
+            let years = parseInt(document.getElementById('years').value);
+            let num_simulations = parseInt(document.getElementById('num_simulations').value);
+            let leverage_input = document.getElementById('leverage_ratios').value;
+            let percentiles_input = document.getElementById('percentiles').value;
+            let percentiles = percentiles_input.split(',').map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
+
+            const days_per_year = 252; // Trading days per year
+
+            // Validate inputs
+            if (isNaN(expected_return) || isNaN(annual_sd) || isNaN(borrowing_cost) || isNaN(years) || isNaN(num_simulations) || percentiles.length === 0) {
+                alert('Please enter valid input values.');
+                return;
+            }
+
+            if (num_simulations > 10000) {
+                alert('Number of simulations is too high. Please enter a value less than or equal to 10,000.');
+                return;
+            }
+
+            // Prepare leverage ratios
+            let leverage_ratios = leverage_input.split(',').map(l => parseFloat(l.trim())).filter(l => !isNaN(l));
+            leverage_ratios = [...new Set(leverage_ratios)]; // Remove duplicates
+
+            if (leverage_ratios.length === 0) {
+                alert('Please enter at least one valid leverage ratio.');
+                return;
+            }
+
+            // Sort leverage ratios
+            leverage_ratios.sort((a, b) => a - b);
+
+            // Prepare data for heatmap
+            const heatmap_z = [];
+            const heatmap_x = leverage_ratios.map(l => l.toFixed(2));
+            const heatmap_y = percentiles;
+
+            // For each percentile
+            for (let p of percentiles) {
+                const row = [];
+                for (let leverage of leverage_ratios) {
+                    const final_values = monteCarloLeverageSimulation(
+                        expected_return,
+                        annual_sd,
+                        borrowing_cost,
+                        leverage,
+                        years,
+                        num_simulations,
+                        days_per_year
+                    );
+
+                    // Calculate the percentile
+                    final_values.sort((a, b) => a - b);
+                    const index = Math.floor((p / 100) * final_values.length);
+                    let percentile_value = final_values[index];
+
+                    // Handle edge cases
+                    if (index >= final_values.length) {
+                        percentile_value = final_values[final_values.length - 1];
+                    }
+                    if (index < 0) {
+                        percentile_value = final_values[0];
+                    }
+
+                    row.push(percentile_value);
+                }
+                heatmap_z.push(row);
+            }
+
+            // Adjust color scale to be perceptually uniform
+            const zValues = heatmap_z.flat();
+            const zMin = Math.min(...zValues);
+            const zMax = Math.max(...zValues);
+
+            // Use a logarithmic color scale
+            const logZ = heatmap_z.map(row => row.map(value => Math.log(value + 1))); // Add 1 to avoid log(0)
+            const logZMin = Math.min(...logZ.flat());
+            const logZMax = Math.max(...logZ.flat());
+
+            // Create hover text for better interactivity
+            const hoverText = heatmap_z.map((row, i) => {
+                return row.map((value, j) => {
+                    return `Percentile: ${heatmap_y[i]}%<br>Leverage: ${heatmap_x[j]}<br>Portfolio Value: ${value.toFixed(2)}`;
+                });
+            });
+
+            // Create heatmap using Plotly
+            const data = [{
+                z: logZ,
+                x: heatmap_x,
+                y: heatmap_y,
+                type: 'heatmap',
+                colorscale: 'YlGnBu',
+                zmin: logZMin,
+                zmax: logZMax,
+                colorbar: {
+                    title: 'Portfolio Value',
+                    tickvals: [logZMin, (logZMin + logZMax) / 2, logZMax],
+                    ticktext: [zMin.toFixed(2), ((zMin + zMax) / 2).toFixed(2), zMax.toFixed(2)]
+                },
+                reversescale: false,
+                hoverinfo: 'text',
+                text: hoverText
+            }];
+
+            const layout = {
+                title: `Monte Carlo Simulations (${num_simulations} Sims): Final Portfolio Value<br>Leverage Ratios: ${leverage_ratios.join(', ')}`,
+                xaxis: {
+                    title: 'Leverage Ratio',
+                    ticksuffix: '',
+                    gridcolor: '#bdc3c7'
+                },
+                yaxis: {
+                    title: 'Percentile',
+                    gridcolor: '#bdc3c7'
+                },
+                margin: {
+                    l: 60,
+                    r: 40,
+                    t: 80,
+                    b: 60
+                },
+                plot_bgcolor: '#f4f7fa',
+                paper_bgcolor: '#f4f7fa',
+                font: {
+                    family: 'Arial, sans-serif',
+                    size: 12,
+                    color: '#2c3e50'
+                }
+            };
+
+            Plotly.newPlot('heatmap', data, layout, {responsive: true});
+        }
+
+        // Add event listener to the button
+        document.getElementById('run_simulation').addEventListener('click', runSimulation);
+
+        // Run the simulation once on page load
+        runSimulation();
+    </script>
+</body>
+</html>
